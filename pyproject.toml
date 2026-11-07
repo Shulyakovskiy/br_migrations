@@ -1,0 +1,28 @@
+[build-system]
+requires = ["uv_build>=0.12.2,<0.13"]
+build-backend = "uv_build"
+
+[project]
+name = "br-migrations"
+version = "0.1.0"
+description = "Atomic Django migrations for PostgreSQL API views"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10,<3.13"
+dependencies = ["Django>=4.2.11,<4.3"]
+
+[project.urls]
+Repository = "https://github.com/Shulyakovskiy/br_migrations"
+Documentation = "https://github.com/Shulyakovskiy/br_migrations#readme"
+"Django Packages" = "https://djangopackages.org/packages/p/br_migrations/"
+
+[dependency-groups]
+dev = [
+    "Django==4.2.11",
+    "psycopg[binary]>=3.2,<4",
+    "testcontainers[postgres]>=4,<5",
+]
+
+[tool.uv.build-backend]
+source-include = ["tests/**", ".gitlab-ci.yml", ".python-version", "uv.lock"]
