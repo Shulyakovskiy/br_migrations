@@ -25,4 +25,4 @@ dev = [
 ]
 
 [tool.uv.build-backend]
-source-include = ["tests/**", ".gitlab-ci.yml", ".python-version", "uv.lock"]
+source-include = ["tests/**", ".gitlab-ci.yml", ".github/workflows/**", ".python-version", "uv.lock"]
