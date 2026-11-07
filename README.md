@@ -6,10 +6,6 @@
 Django-приложение для атомарных миграций PostgreSQL с зависимыми представлениями
 схемы `api`.
 
-Реализация скопирована из `br.demo/django-api-migrations-demo/api_migrations`.
-Пакет устанавливается в другой проект и подключает собственную команду
-`migrate` через стандартный механизм Django.
-
 ## Установка в проект
 
 ### Через uv и SSH
@@ -70,16 +66,6 @@ uv run python manage.py migrate locations 0041
 
 Поддерживается и штатный `call_command("migrate", ...)`.
 В файлах миграций используются обычные операции Django.
-
-### Замена исходного приложения
-
-Если проект уже использует `api_migrations`, замените его на `br_migrations`
-в `INSTALLED_APPS`, а настройки `API_MIGRATIONS_*` переименуйте
-в `BR_MIGRATIONS_*`.
-
-Служебная таблица `django_api_guard.view_history` и ключ advisory lock
-сохранены из исходной реализации. Существующий журнал продолжает
-использоваться при откате миграций.
 
 ## Что делает приложение
 
@@ -155,16 +141,6 @@ uv build
 
 Тестовый проект и модели находятся в `tests/`. Wheel содержит приложение
 `br_migrations`, а исходный архив включает тесты и конфигурацию CI.
-
-## GitLab CI
-
-Job `test` запускается на runner с тегом `registry-deploy` и Docker-in-Docker.
-Он устанавливает пакет через `uv sync --locked --no-editable`, выполняет тесты
-на Django 4.2.11 с PostgreSQL из Testcontainers и собирает wheel/sdist.
-Сборки доступны в артефактах job семь дней.
-
-Pipeline выполняется для веток и merge request. После открытия MR новые push
-используют его pipeline, чтобы избежать дублирования прогонов.
 
 ## Лицензия
 
