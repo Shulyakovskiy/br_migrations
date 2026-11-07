@@ -1,0 +1,20 @@
+[build-system]
+requires = ["uv_build>=0.12.2,<0.13"]
+build-backend = "uv_build"
+
+[project]
+name = "br-migrations"
+version = "0.1.0"
+description = "Atomic Django migrations for PostgreSQL API views"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+dependencies = ["Django>=4.2.11,<4.3"]
+
+[project.urls]
+Repository = "https://git.intra-beetroute.ru/beetroute/django-app"
+
+[dependency-groups]
+dev = ["Django==4.2.11", "psycopg[binary]>=3.2,<4"]
+
+[tool.uv.build-backend]
+source-include = ["tests/**", "compose.yaml", ".python-version", "uv.lock"]

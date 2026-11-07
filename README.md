@@ -1,93 +1,146 @@
-# django-app
+# br_migrations
 
+Django-приложение для атомарных миграций PostgreSQL с зависимыми представлениями
+схемы `api`.
 
+Реализация скопирована из `br.demo/django-api-migrations-demo/api_migrations`.
+Пакет устанавливается в другой проект и подключает собственную команду
+`migrate` через стандартный механизм Django.
 
-## Getting started
+## Установка в проект
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+### Через uv и SSH
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+В каталоге проекта выполните команду.
 
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
-```
-cd existing_repo
-git remote add origin https://git.intra-beetroute.ru/beetroute/django-app.git
-git branch -M main
-git push -uf origin main
+```bash
+uv add \
+    "br-migrations @ git+ssh://git@git.intra-beetroute.ru:2224/beetroute/django-app.git@main"
 ```
 
-## Integrate with your tools
+Затем добавьте приложение первым в `INSTALLED_APPS` в settings проекта.
 
-* [Set up project integrations](https://git.intra-beetroute.ru/beetroute/django-app/-/settings/integrations)
+```python
+INSTALLED_APPS = [
+    "br_migrations",
+    # Остальные приложения проекта.
+]
+```
 
-## Collaborate with your team
+Django автоматически использует `BrMigrationsConfig`. Также доступен полный
+путь `"br_migrations.apps.BrMigrationsConfig"`.
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+При запуске `check` или `migrate` приложение проверяет, что другая команда
+`migrate` из `INSTALLED_APPS` не перекрывает его реализацию. При неверном порядке
+Django сообщает `br_migrations.E001`.
 
-## Test and Deploy
+### Зависимости
 
-Use the built-in continuous integration in GitLab.
+Пакет требует Python 3.10–3.12 и Django `>=4.2.11,<4.3`.
+В окружении разработки и тестов зафиксирован Django 4.2.11 и Python 3.12.
+Драйвер PostgreSQL выбирает подключающий проект. Интеграционные тесты
+используют `psycopg[binary]`.
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+## Настройки и использование
 
-***
+В settings проекта доступны две настройки.
 
-# Editing this README
+```python
+BR_MIGRATIONS_ENABLED = True
+BR_MIGRATIONS_DATABASE = "default"
+```
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+Оба значения используются по умолчанию. При `BR_MIGRATIONS_ENABLED = False`
+команда делегирует выполнение стандартному `migrate` Django.
+Для другого алиаса БД задайте `BR_MIGRATIONS_DATABASE` и передайте этот алиас
+в `--database`.
 
-## Suggestions for a good README
+```bash
+uv run python manage.py check
+uv run python manage.py makemigrations
+uv run python manage.py migrate
+uv run python manage.py migrate locations 0041
+```
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+Поддерживается и штатный `call_command("migrate", ...)`.
+В файлах миграций используются обычные операции Django.
 
-## Name
-Choose a self-explaining name for your project.
+### Замена исходного приложения
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+Если проект уже использует `api_migrations`, замените его на `br_migrations`
+в `INSTALLED_APPS`, а настройки `API_MIGRATIONS_*` переименуйте
+в `BR_MIGRATIONS_*`.
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+Служебная таблица `django_api_guard.view_history` и ключ advisory lock
+сохранены из исходной реализации. Существующий журнал продолжает
+использоваться при откате миграций.
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+## Что делает приложение
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+1. Перед каждой миграцией читает обычные представления `api` и их зависимости.
+   Временно заменяет запросы представлений, освобождая зависимости от таблиц.
+2. Выполняет операции Django и восстанавливает запросы в порядке зависимостей.
+3. При неизменной сигнатуре сохраняет OID через `CREATE OR REPLACE VIEW`.
+   При переходе `varchar ↔ text` пересоздаёт затронутые представления.
+4. Возвращает владельца, права на представление и колонки, параметры,
+   комментарии и значения по умолчанию. Проверяет делегированные права
+   и `WITH GRANT OPTION`.
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+Весь вызов `migrate` выполняется в одной транзакции на выбранном алиасе.
+При ошибке откатываются DDL, представления, служебный журнал
+и записи `django_migrations`.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+Advisory lock исключает одновременный запуск этой команды в одной БД.
+Ожидание блокировок ограничено пятью секундами. Полученные блокировки
+сохраняются до завершения транзакции.
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+После успешного commit PostgreSQL доставляет `NOTIFY pgrst, 'reload schema'`.
+При пересоздании представление получает новый OID.
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+## Права мигратора
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+- Изменение базовых таблиц, замена и создание представлений в `api`.
+- Возврат исходного владельца и возможность выполнить `SET ROLE`
+  для владельца и ролей, выдавших делегированные права.
+- Право создать схему `django_api_guard` либо заранее созданная схема
+  во владении мигратора.
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+Служебная таблица создаётся при первом сохранении истории представлений.
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+## Границы автоматической обработки
 
-## License
-For open source projects, say how it is licensed.
+- Поддерживается смена типа `varchar ↔ text` при сохранении имён,
+  порядка и collation колонок.
+- Представления с триггерами, дополнительными правилами или security labels
+  требуют отдельного сценария пересоздания.
+- Внешние зависимости и materialized views могут заблокировать
+  `DROP VIEW RESTRICT`. В таком случае транзакция откатывается.
+- `RemoveField` и `DeleteModel` в Django 4.2.11 используют `CASCADE`
+  в собственном DDL.
+- Данные в миграциях читайте из базовых таблиц. Запрос к временно
+  отсоединённому представлению завершится ошибкой.
+- При создании представления над изменяемым полем сначала измените поле.
+  Создание представления над другим view, которое нужно пересоздать,
+  вынесите в следующую миграцию.
+- Для `atomic = False` и `CREATE INDEX CONCURRENTLY` используйте отдельный
+  запуск с отключённым механизмом.
+- Автоматическая обработка подключена к команде `migrate`.
+  Прямой вызов `MigrationExecutor` и `sqlmigrate` обходят эту команду.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+## Разработка и тесты
+
+```bash
+uv sync --locked
+docker compose up -d --wait
+uv run python -m django test --settings=tests.settings
+uv run python -m django makemigrations --check --dry-run --settings=tests.settings
+uv build
+docker compose down --volumes
+```
+
+Тестовый PostgreSQL работает на `127.0.0.1:55433`. Параметры подключения
+можно задать через `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`.
+Тестам нужны права на создание отдельной БД и временных ролей.
+
+Тестовый проект и модели находятся в `tests/`. Wheel содержит приложение
+`br_migrations`, а исходный архив включает тесты и конфигурацию запуска.
