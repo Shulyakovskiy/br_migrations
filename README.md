@@ -129,18 +129,31 @@ Advisory lock исключает одновременный запуск это�
 
 ## Разработка и тесты
 
+Для тестов требуется работающий Docker Engine.
+
 ```bash
 uv sync --locked
-docker compose up -d --wait
-uv run python -m django test --settings=tests.settings
-uv run python -m django makemigrations --check --dry-run --settings=tests.settings
+uv run python -m django test --settings=tests.settings -v 2
 uv build
-docker compose down --volumes
 ```
 
-Тестовый PostgreSQL работает на `127.0.0.1:55433`. Параметры подключения
-можно задать через `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`.
-Тестам нужны права на создание отдельной БД и временных ролей.
+Тестовый runner поднимает PostgreSQL 17 через Testcontainers, передаёт Django
+адрес контейнера и освобождает ресурсы после прогона, включая аварийное завершение
+тестов. Каждому запуску назначается отдельный порт.
 
 Тестовый проект и модели находятся в `tests/`. Wheel содержит приложение
-`br_migrations`, а исходный архив включает тесты и конфигурацию запуска.
+`br_migrations`, а исходный архив включает тесты и конфигурацию CI.
+
+## GitLab CI
+
+Job `test` запускается на runner с тегом `registry-deploy` и Docker-in-Docker.
+Он устанавливает пакет через `uv sync --locked --no-editable`, выполняет тесты
+на Django 4.2.11 с PostgreSQL из Testcontainers и собирает wheel/sdist.
+Сборки доступны в артефактах job семь дней.
+
+Pipeline выполняется для веток и merge request. После открытия MR новые push
+используют его pipeline, чтобы избежать дублирования прогонов.
+
+## Лицензия
+
+MIT, см. [LICENSE](LICENSE).
