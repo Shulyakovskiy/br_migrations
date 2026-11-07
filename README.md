@@ -1,5 +1,8 @@
 # br_migrations
 
+[Публичный репозиторий](https://github.com/Shulyakovskiy/br_migrations) ·
+[Каталог Django Packages](https://djangopackages.org/packages/p/br_migrations/)
+
 Django-приложение для атомарных миграций PostgreSQL с зависимыми представлениями
 схемы `api`.
 

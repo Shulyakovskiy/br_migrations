@@ -15,6 +15,7 @@ dependencies = ["Django>=4.2.11,<4.3"]
 [project.urls]
 Repository = "https://github.com/Shulyakovskiy/br_migrations"
 Documentation = "https://github.com/Shulyakovskiy/br_migrations#readme"
+"Django Packages" = "https://djangopackages.org/packages/p/br_migrations/"
 
 [dependency-groups]
 dev = [
