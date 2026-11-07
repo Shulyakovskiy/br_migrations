@@ -3,12 +3,17 @@ from django.core.management.base import CommandError
 from django.core.management.commands.migrate import Command as DjangoMigrateCommand
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
 
-from br_migrations.views import detach_views, restore_views
+from br_migrations.execution import ViewDependencies
+from br_migrations.history import take_history
+from br_migrations.views import catalog_cursor
+from br_migrations.views import finish_migration, snapshot_views
 
 
 class Command(DjangoMigrateCommand):
     _guard_connection = None
     _view_state = None
+    _dependencies = None
+    _history = None
 
     def handle(self, *args, **options):
         alias = options["database"]
@@ -29,16 +34,18 @@ class Command(DjangoMigrateCommand):
         with transaction.atomic(using=alias, durable=True):
             with connection.cursor() as cursor:
                 cursor.execute("SET LOCAL lock_timeout = '5s'")
-                cursor.execute("SELECT pg_catalog.pg_try_advisory_xact_lock(17318, 20801)")
-                if not cursor.fetchone()[0]:
-                    raise CommandError("Another migration is running on this database.")
+                cursor.execute("SELECT pg_catalog.pg_advisory_xact_lock(17318, 20801)")
 
             self._guard_connection = connection
+            self._dependencies = ViewDependencies(connection)
             try:
-                return super().handle(*args, **options)
+                with connection.execute_wrapper(self._dependencies):
+                    return super().handle(*args, **options)
             finally:
                 self._guard_connection = None
                 self._view_state = None
+                self._dependencies = None
+                self._history = None
 
     def migration_progress_callback(self, action, migration=None, fake=False):
         connection = self._guard_connection
@@ -46,17 +53,29 @@ class Command(DjangoMigrateCommand):
             if action in ("apply_start", "unapply_start") and not fake:
                 if not migration.atomic:
                     raise CommandError(f"{migration} must be atomic on this database.")
-                self._view_state = detach_views(connection)
+                self._view_state = snapshot_views(connection)
+                self._dependencies.replacements.clear()
+                self._history = {}
+                if action == "unapply_start":
+                    with catalog_cursor(connection) as cursor:
+                        self._history = take_history(cursor, (migration.app_label, migration.name))
+                self._dependencies.queries = {
+                    name: before
+                    for name, (before, after) in self._history.items()
+                    if before is not None and name in self._view_state
+                    and self._view_state[name].definition == after
+                }
             if action in ("apply_success", "unapply_success"):
-                if self._view_state is not None:
-                    migration_key = (migration.app_label, migration.name)
-                    restore_views(
+                if self._view_state is not None and not fake:
+                    finish_migration(
                         connection,
-                        *self._view_state,
-                        migration_key=None if fake else migration_key,
+                        self._view_state,
+                        (migration.app_label, migration.name),
                         backwards=action == "unapply_success",
+                        replacements=self._dependencies.replacements,
+                        history=self._history,
                     )
-                    self._view_state = None
+                self._view_state = None
                 if not fake:
                     # PostgreSQL coalesces identical notifications at commit.
                     with connection.cursor() as cursor:

@@ -1,11 +1,11 @@
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from graphlib import TopologicalSorter
 
 from django.core.management.base import CommandError
 from django.db import ProgrammingError, transaction
 
-from br_migrations.history import record_history, take_history
+from br_migrations.history import record_history
 from br_migrations.rebuild import rebuild_view
 
 
@@ -108,49 +108,74 @@ def order_views(cursor, views):
     return {name: views[name] for name in ordered}
 
 
-def restore_views(connection, original, detached, migration_key, backwards):
+def restore_views(connection, original, detached, queries=None):
     with catalog_cursor(connection) as cursor:
-        current = read_views(cursor)
-        history = take_history(cursor, migration_key) if backwards else {}
-        to_restore = {}
+        if read_views(cursor) != detached:
+            raise CommandError("API views changed while resolving their dependencies.")
+
         for name, view in original.items():
-            before, after = history.get(name, (None, None))
-            if name not in current and before is None and after == view.definition:
-                # Only allow the inverse of CREATE VIEW, including its original identity.
-                cursor.execute("SELECT 1 FROM pg_class WHERE oid = %s", [view.oid])
-                if cursor.fetchone() is None:
-                    continue
-            if current.get(name) != detached[name]:
-                raise CommandError(
-                    f"{name} was changed by the migration. "
-                    "Run intentional changes to API views separately."
-                )
-            query = view.definition
-            if before is not None and after == view.definition:
-                query = before
-            to_restore[name] = query
+            options = f" WITH ({view.options})" if view.options else ""
+            candidates = [queries.get(name, view.definition)] if queries else [view.definition]
+            if candidates[0] != view.definition:
+                candidates.append(view.definition)
+            for query in candidates:
+                definition = f"VIEW {name}{options} AS {query}"
+                try:
+                    with transaction.atomic(using=connection.alias):
+                        cursor.execute(f"CREATE OR REPLACE {definition}")
+                except ProgrammingError as exc:
+                    cause = exc.__cause__
+                    code = getattr(cause, "sqlstate", getattr(cause, "pgcode", None))
+                    if code in ("42703", "42P01") and query != view.definition:
+                        # A later reverse operation may still need to undo a rename.
+                        continue
+                    if code != "42P16":
+                        raise
+                    rebuild_view(cursor, name, f"CREATE {definition}")
+                break
 
-        for name, query in to_restore.items():
-            options = original[name].options
-            with_options = f" WITH ({options})" if options else ""
-            definition = f"VIEW {name}{with_options} AS {query}"
-            try:
-                with transaction.atomic(using=connection.alias):
-                    cursor.execute(f"CREATE OR REPLACE {definition}")
-            except ProgrammingError as exc:
-                cause = exc.__cause__
-                if getattr(cause, "sqlstate", getattr(cause, "pgcode", None)) != "42P16":
-                    raise
-                rebuild_view(cursor, name, f"CREATE {definition}")
-
-        restored = read_views(cursor) if to_restore else current
-        for name in to_restore:
-            view = original[name]
+        restored = read_views(cursor)
+        for name, view in original.items():
             actual = restored[name]
             if actual.options != view.options or (
                 actual.oid == view.oid and actual.projection != view.projection
             ):
                 raise CommandError(f"The public signature or options of {name} changed.")
+        return restored
 
-        if migration_key is not None and not backwards:
-            record_history(cursor, migration_key, original, restored)
+
+def snapshot_views(connection):
+    with catalog_cursor(connection) as cursor:
+        return read_views(cursor)
+
+
+def finish_migration(connection, original, migration_key, backwards, replacements, history):
+    with catalog_cursor(connection) as cursor:
+        current = read_views(cursor)
+        queries = {}
+        for name, view in original.items():
+            before, after = history.get(name, (None, None))
+            expected_oid = view.oid
+            while expected_oid in replacements:
+                expected_oid = replacements[expected_oid]
+            if name not in current and before is None and after == view.definition:
+                cursor.execute("SELECT 1 FROM pg_class WHERE oid = %s", [expected_oid])
+                if cursor.fetchone() is None:
+                    continue
+            if name not in current or current[name].oid != expected_oid:
+                raise CommandError(f"{name} was changed by the migration.")
+            if before is not None and after == view.definition:
+                if current[name].definition != before:
+                    queries[name] = before
+
+    if queries:
+        existing, detached = detach_views(connection)
+        desired = {
+            name: replace(view, definition=queries.get(name, view.definition))
+            for name, view in existing.items()
+        }
+        current = restore_views(connection, desired, detached)
+
+    if not backwards:
+        with catalog_cursor(connection) as cursor:
+            record_history(cursor, migration_key, original, current)

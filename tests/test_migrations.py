@@ -1,10 +1,12 @@
+from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module
+from threading import Event
 from io import StringIO
 from unittest.mock import patch
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import DatabaseError, NotSupportedError, connection, migrations
+from django.db import DatabaseError, NotSupportedError, connection, connections, migrations, models
 from django.test import TransactionTestCase, override_settings
 
 
@@ -170,10 +172,13 @@ class ApiViewMigrationTests(TransactionTestCase):
                 """
             )
             self.assertFalse(cursor.fetchone()[0])
+        self.drop_external_view()
+        self.migrate("0003")
+        self.assertEqual(self.table_title_type(), "text")
 
     def drop_external_view(self):
         with connection.cursor() as cursor:
-            cursor.execute("DROP VIEW public.external_cards")
+            cursor.execute("DROP VIEW IF EXISTS public.external_cards")
 
     def test_reverse_of_view_creation_removes_only_the_views_created_by_it(self):
         self.migrate("0001")
@@ -221,3 +226,106 @@ class ApiViewMigrationTests(TransactionTestCase):
         ):
             self.migrate("0003")
         self.assertEqual(self.table_title_type(), "character varying")
+
+    def test_repeated_migrate_preserves_views_and_journal(self):
+        self.migrate("0003")
+        original = self.view_metadata("api.location_cards")
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT * FROM django_api_guard.view_history ORDER BY 1, 2, 3")
+            history = cursor.fetchall()
+        for _ in range(2):
+            call_command("migrate", stdout=StringIO(), verbosity=0)
+            self.assertEqual(self.view_metadata("api.location_cards"), original)
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT * FROM django_api_guard.view_history ORDER BY 1, 2, 3")
+                self.assertEqual(cursor.fetchall(), history)
+
+    def test_rename_and_type_change_preserve_view_queries_in_both_directions(self):
+        migration = import_module("tests.locations.migrations.0003_location_title_text").Migration
+        operations = [
+            migrations.RenameField(model_name="location", old_name="title", new_name="name"),
+            migrations.AlterField(model_name="location", name="name", field=models.TextField()),
+        ]
+        with patch.object(migration, "operations", operations):
+            self.migrate("0003")
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT title, pg_typeof(title)::text FROM api.location_cards")
+                self.assertEqual(cursor.fetchall(), [("Station", "text")])
+            self.migrate("0002")
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT title FROM api.location_cards")
+                self.assertEqual(cursor.fetchall(), [("Station",)])
+
+    def test_new_view_before_type_change_is_discovered(self):
+        migration = import_module("tests.locations.migrations.0003_location_title_text").Migration
+        operations = [
+            migrations.RunSQL(
+                "CREATE VIEW api.new_cards AS SELECT title FROM api.location_cards",
+                "DROP VIEW api.new_cards",
+            ),
+            *migration.operations,
+        ]
+        with patch.object(migration, "operations", operations):
+            self.migrate("0003")
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT title, pg_typeof(title)::text FROM api.new_cards")
+                self.assertEqual(cursor.fetchall(), [("Station", "text")])
+            self.migrate("0002")
+
+    def test_concurrent_migrate_serializes_and_rechecks_the_plan(self):
+        migration = import_module("tests.locations.migrations.0003_location_title_text").Migration
+        started = Event()
+
+        def hold_transaction(apps, schema_editor):
+            started.set()
+            schema_editor.execute("SELECT pg_sleep(0.5)")
+
+        def migrate_in_thread():
+            try:
+                self.migrate("0003")
+            finally:
+                connections.close_all()
+
+        operations = [migrations.RunPython(hold_transaction, migrations.RunPython.noop),
+                      *migration.operations]
+        with patch.object(migration, "operations", operations):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                first = pool.submit(migrate_in_thread)
+                self.assertTrue(started.wait(5))
+                second = pool.submit(migrate_in_thread)
+                first.result(timeout=10)
+                second.result(timeout=10)
+        self.assertEqual(self.table_title_type(), "text")
+
+    def test_model_rename_and_type_change_use_native_dependencies(self):
+        migration = import_module("tests.locations.migrations.0003_location_title_text").Migration
+        operations = [
+            migrations.RenameModel(old_name="Location", new_name="Place"),
+            migrations.AlterField(model_name="place", name="title", field=models.TextField()),
+        ]
+        with patch.object(migration, "operations", operations):
+            self.migrate("0003")
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT title, pg_typeof(title)::text FROM api.location_cards")
+                self.assertEqual(cursor.fetchall(), [("Station", "text")])
+            self.migrate("0002")
+        self.assertEqual(self.table_title_type(), "character varying")
+
+    def test_data_migration_can_read_views_before_and_after_type_change(self):
+        migration = import_module("tests.locations.migrations.0003_location_title_text").Migration
+        values = []
+
+        def read_view(apps, schema_editor):
+            with schema_editor.connection.cursor() as cursor:
+                cursor.execute("SELECT title FROM api.location_cards")
+                values.append(cursor.fetchall())
+
+        operations = [
+            migrations.RunPython(read_view, migrations.RunPython.noop),
+            *migration.operations,
+            migrations.RunPython(read_view, migrations.RunPython.noop),
+        ]
+        with patch.object(migration, "operations", operations):
+            self.migrate("0003")
+            self.migrate("0002")
+        self.assertEqual(values, [[("Station",)], [("Station",)]])

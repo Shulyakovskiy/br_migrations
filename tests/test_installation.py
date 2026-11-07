@@ -1,6 +1,8 @@
+from io import StringIO
+
 from django.apps import apps
 from django.core.checks import Tags, run_checks
-from django.core.management import get_commands
+from django.core.management import call_command, get_commands
 from django.test import SimpleTestCase, override_settings
 
 from br_migrations.apps import BrMigrationsConfig
@@ -24,3 +26,10 @@ class InstallationTests(SimpleTestCase):
     )
     def test_disabled_allows_the_project_migrate_command(self):
         self.assertEqual(run_checks(tags=[Tags.compatibility]), [])
+
+
+class MigrationStateTests(SimpleTestCase):
+    databases = {"default"}
+
+    def test_models_match_migration_state(self):
+        call_command("makemigrations", check=True, dry_run=True, stdout=StringIO())
