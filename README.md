@@ -14,11 +14,10 @@ Django-приложение для атомарных миграций PostgreSQ
 
 ```bash
 uv add \
-    "br-migrations @ git+ssh://git@github.com/Shulyakovskiy/br_migrations.git@br"
+    "br-migrations @ git+ssh://git@github.com/Shulyakovskiy/br_migrations.git@main"
 ```
 
-Текущая проверяемая версия находится в ветке `br`. `uv.lock` сохраняет
-конкретный SHA репозитория.
+`uv.lock` сохраняет конкретный SHA репозитория.
 
 Затем добавьте приложение первым в `INSTALLED_APPS` в settings проекта.
 
@@ -141,6 +140,16 @@ uv build
 
 Тестовый проект и модели находятся в `tests/`. Wheel содержит приложение
 `br_migrations`, а исходный архив включает тесты и конфигурацию CI.
+
+## Выпуск пакета
+
+Тег `vX.Y.Z` запускает тесты и сборку в GitHub Actions, затем публикует
+wheel и исходный архив в [GitHub Releases](https://github.com/Shulyakovskiy/br_migrations/releases).
+Версия тега должна совпадать с `project.version` в `pyproject.toml`.
+Повторный запуск workflow обновляет файлы существующего релиза.
+
+Тег создаётся в GitLab на коммите `main` после слияния изменений.
+GitLab автоматически передаёт ветки и теги в публичный репозиторий.
 
 ## Лицензия
 
